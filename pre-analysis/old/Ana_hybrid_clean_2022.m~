@@ -1,0 +1,880 @@
+%% Settings 2020 edit
+
+%% Settings
+clear all
+close all
+%cd /Users/dac/Documents/GitLab/visualsearch_eegem/codes
+cd ~/PROJECTS/prehybridana/dep/
+
+[runpath,code_path,session_path,whoisrunning]=add_paths_EEG_ET_hybrid(1,1)%(1,1) for use in laptop
+
+eeglabpath = code_path.eeglabpath
+addpath(eeglabpath); 
+ftpath      =        code_path.toolbox ;
+addpath(ftpath); 
+addpath(code_path.corregistro_fn)
+addpath(code_path.my_functions)
+clear fp; fp = FP_epochAnalysis();
+
+eeglab
+
+datapath =  code_path.raw;
+
+cd(datapath)
+%% 0 SETUP
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+hipothesis = 'Intercept';
+
+modelName = 'Inter'; %targ*memsize
+model     = {'y ~ 1'}; 
+%e.g.: '(Intercept)' , 'hard_easy', 'stimulusDur', 'saccade_amp' you can
+variablesOI   = {'(Intercept)' hipothesis }; %'StandFixRank:isEX'};
+%e.g.: '(Intercept)' , 'hard_easy', 'stimulusDur', 'saccade_amp'
+cond = split(hipothesis,'_');
+baselineCorr    = 1;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%% 1 STEP  (this step is taking a couple of hours should be check to improve efficiency)
+
+folderIn               =  session_path.data_analysis;
+fp.cfg.subjname         =  session_path.subjname;
+folderOut               = '/media/dac/DATOS-curie/HybridAnalysis/AUX/ana100'
+
+
+
+redoFlag = 1;
+
+if  exist(folderOut)==0
+    mkdir(folderOut)
+end
+% namesIn  = fp.fn.loadSubjects(folderIn, 1, 1,'set');
+% namesOut = fp.fn.loadSubjects(folderOut, 1, 1, 'set');
+% csvPath =  '/media/dac/DATOS-curie/HybridSearch/';
+% 
+% 
+% 
+
+
+names = fp.loadSubjects(folderIn, 1, 1, 'set');
+
+
+%EEG = pop_loadset('filename','S101_stim_epoched.set','filepath','/media/dac/DATOS-curie/HybridAnalysis/7.epoched_data/');
+chan = EEG.chanlocs;
+ERPstruct = [];
+ch = 1:128%[95 78 9 38]%%,'Cz','Pz','Oz'}{'O2','O1'}%;
+YLIMI = [-6 6];
+times = EEG.times;
+XLIMI = [min(times) 300];
+limits = [-.2 .3];
+
+csvPath_exp   =  '/media/dac/DATOS-curie/HybridSearch/';
+csvPath_stims ='/media/dac/DATOS-curie/HybridAnalysis/AUX';
+csv_stims = dir(fullfile(csvPath_stims,'/*.csv'));
+csv_stims = fullfile(csvPath_stims,csv_stims.name);
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%stims CSV loading %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%stim table%%%%%%%%%%
+stims_data        = readtable(csv_stims);%csv with trial info
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+fix = []
+%%%%%%%%%%%
+tmax = 22;%so far these are just mock values but will be significative
+tmin = 33;%once duration filters are added.
+%radius = 200;%radius to consider that a fixation landed on a stimulus
+trialMark = '255';
+eventtype = 'fixation';
+
+%%%%%%%%%%%%%%%%%%%%
+for su = 1:length(names)
+    fixepoch = [];%zeros(4,300);
+    ERPstructTmp = [];
+    filename =  names{su};
+    %%%%%%%%%%%%%%%%subject CSV loading%%%%%%%%%%%%%%%%%%%%%%%%%%
+    % Load
+    csv_exp = dir(fullfile(csvPath_exp,filename(1:4),'/*.csv'));
+    csv_exp = fullfile(csvPath_exp,filename(1:4),csv_exp.name);
+    csvFilePath = csv_exp;
+    data        = readtable(csvFilePath);%csv with trial info
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    fun_check_csv_complete(data,stims_data)%this function check that all 
+    %search images are present in the csv_stims so that we can retrieve 
+    %offset and size information about the cmp_image
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    for rad = 60%[56 60 100 150 200]
+
+    %keyboard
+    EEG = pop_loadset([folderIn filename]);
+    EEG.chanlocs = chan;
+    
+    EEG = pop_select(EEG, 'channel',[1:128]);
+    chanlocsFilePath =[session_path.raw '/biosemi128.ced'];
+    EEG = pop_chanedit(EEG, 'lookup', chanlocsFilePath);
+
+    %test
+    % (~isempty([EEG.event.isdistractor]) && ~isempty([EEG.event.istarget]) )
+    % && ( [EEG.event.istarget] || [EEG.event.isdistractor])
+    %for rad = [56 60 100 150]
+        EEG = fun_add_trial_data_to_events(EEG, data,stims_data,trialMark,eventtype,tmin,tmax,rad);
+        not_targ_dist  = arrayfun(@(x)  isempty(x.istarget)  ,EEG.event);
+        ind =   find(~not_targ_dist)  % && ([EEG.event.istarget] || [EEG.event.isdistractor]))%%%%%
+        tmp = [];
+        fixtmp =[];
+        for in = 1:length(ind)
+            if EEG.event(ind(in)).istarget | EEG.event(ind(in)).isdistractor 
+            
+                tmp = [tmp ; EEG.event(ind(in)).duration];
+                %keyboard
+            end
+        end
+        fixtmp.duration = tmp;
+    end
+    %keyboard
+    fix = [fix , fixtmp];
+    if redoFlag
+       outFile = [ folderOut '/' filename(1:4) '_rad100.set']; 
+       EEG = pop_saveset(EEG, outFile);
+    end
+     %subject percentage of fixations to item
+     %sum(~not_targ_dist)/sum(strcmp({EEG.event.type},'fixation'))
+end
+
+
+
+%% STEP 2 
+
+fp.cfg.subjname         =  session_path.subjname;
+inFolder               = '/media/dac/DATOS-curie/HybridAnalysis/AUX/ana100/'% change name from step 1
+redoFlag = 1;
+names = fp.loadSubjects(inFolder, 1, 1, 'set');
+
+
+models = fullfile(inFolder, 'models/' );
+
+folderModelName         = [ modelName '/'];
+folderOut               = fullfile(models,folderModelName);
+
+if ~exist(folderOut, 'dir')
+    mkdir(folderOut)
+end
+
+
+for su = 1:length(names) %ONE SUBJECT
+   
+     
+    fp.cfg.inFile = [inFolder names{su}];
+    inFile              = fp.cfg.inFile
+    EEG = pop_loadset(inFile);
+    
+      %DEFINING THE DESIGN   NEW CHECK ALL FOLLOWING LINES
+    
+    % tstart_unfold = tic;
+    
+    cfgDesign = [];
+    cfgDesign.eventtypes = {'fixation'}; % we model the fixation onset
+    %cfgDesign.formula = {'y ~ 1+cat(isEasy)'} %cat(stimulusType)'}%+cat(fixationRank)'};
+    cfgDesign.formula = model ; %saccade_amp + cat(hard_easy)'}%+stimulusDur+cat(hard_easy)'}
+    
+    %impute NaNs
+    not_targ_dist  = arrayfun(@(x)  isempty(x.istarget)  ,EEG.event);
+    EEG.event(not_targ_dist) = [];
+    
+    %One needs to be careful to not overfit the data, regularization or cross validation can help here.
+    EEG = uf_designmat(EEG,cfgDesign);
+    
+    % DELETE NANS mdf 29/6/21 
+    %cfgNueva = [];
+    %cfgNueva.method = 'drop';
+    %EEG = uf_imputeMissing(EEG,cfgNueva)
+    
+    % DETECT NOISY DATA
+    winrej = uf_continuousArtifactDetect(EEG,'amplitudeThreshold',250); % before350posterversion % mdf 8/6/21 to detect sporius channels with amplitude over...
+    winrej = bad_ET_ArtifactDetect(EEG,winrej); %DAC 27 sept 2021 detect bad_ET marks
+    
+    %TIME EXPAND
+    cfgTimeexpand = [];
+    cfgTimeexpand.timelimits = [-.2,.4];
+    EEG = uf_timeexpandDesignmat(EEG,cfgTimeexpand);
+    %keyboard
+    %REJECT NOISY DATA
+    EEG = uf_continuousArtifactExclude(EEG,struct('winrej',winrej)); 
+    % we find data using a simple threshold tool. More complex algorithms or manual cleaning is recommended!
+
+%     for il = 1:length(EEG.event)
+%         EEG.event(il).latency = EEG.event(il).PermLatency 
+%     end   
+    EEG.event(ismember({EEG.event.type},{'bad_ET','boundary'})) = []; %DAC mod 30 sept 2021
+
+    %FITTING MODEL 
+    EEG= uf_glmfit(EEG);
+    
+    % tend_unfold = toc(tstart_unfold)
+    
+    % tstart_save = tic;
+
+    suje = names{su}; sujName = suje(1:end-4);
+    
+    if length(cond)>1
+        n = struct(cond{1},sum([EEG.event.istarget]==1),cond{2},sum([EEG.event.istarget]==0));
+        EEG.unfold.N = struct(cond{1}, n.(cond{1}), cond{2},n.(cond{2})); % unreliable
+    else
+        n = struct(cond{1},sum([EEG.event.istarget]==1));
+        EEG.unfold.N = struct(cond{1}, n.(cond{1})); % unreliable    
+    end
+    unfoldResults.(sujName) = EEG.unfold;
+    
+    if 0%sanity_checks
+        % folder_sanity = [folderOut 'afterBadETafterBoundary_onlyFix/'];
+        if strcmp(hipothesis,'NTF_NTO')
+            ch1 = 'PO7'
+        elseif strcmp(hipothesis,'VSNT_EX')
+            ch1 = 'F1'
+        end
+        fp.plotUnfoldErpimageCheck(EEG,ch1,hipothesis,'fixation',10)
+        % saveas(gcf,'Barchart.png')
+        if strcmp(hipothesis,'NTF_NTO')
+            ch2 = 'PO8'
+        elseif strcmp(hipothesis,'VSNT_EX')
+            ch2 = 'F2'
+        end
+        fp.plotUnfoldErpimageCheck(EEG,ch2,hipothesis,'fixation',10)       
+        fp.plotUnfoldErpimageCheck(EEG,'O1',hipothesis,'fixation',10)     
+        fp.plotUnfoldErpimageCheck(EEG,'O2',hipothesis,'fixation',10)     
+    end
+
+    fileOut = [folderOut  'Results.mat'];
+    save(fileOut,'unfoldResults')
+    
+    % tend_save = toc(tstart_save)
+    
+end
+
+%% STEP 3 making FRP from unfold results
+
+% unfiltered data has not the baseline correction
+
+inFolder                =  fullfile(session_path.out, 'AUX/ana100');
+models = fullfile(inFolder, 'models/' );
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%use the name of the folder where the model were stored
+model2analyse = modelName;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+folderOut = fullfile(models,model2analyse);
+
+
+if exist(folderOut, 'dir')
+    
+    load(fullfile(folderOut, 'Results.mat'));
+    variableStruct =[];
+    subjects   = fieldnames(unfoldResults);
+    for iSuj  = 1:length(fieldnames(unfoldResults))
+        suj   = subjects{iSuj}; 
+        result = unfoldResults.(suj);
+        variableStruct  = fun_makeStructToERPunfold(variableStruct,variablesOI,iSuj,suj,result,hipothesis)
+    end
+
+    fileOut   = fullfile(folderOut,'variableStruct.mat');
+
+    save(fileOut,'variableStruct')
+
+%load(fileOut)
+else
+    fprintf("the model doesn't  exist, check model name or fit it \n")
+end
+%% PLOT CHO O
+
+
+chanlocsFilePath =[session_path.raw '/biosemi128.ced'];% [  session_path.aux_data 'coords_LNI_128_toreplaceinEEG.mat' ]; %complete path to chanloc file
+
+EEG=pop_chanedit(EEG, 'lookup','/media/dac/DATOS-curie/HybridSearch/bdf/biosemi128.ced',...
+    'load',{'/media/dac/DATOS-curie/HybridSearch/bdf/biosemi128.ced','filetype','autodetect'},...
+    'rplurchanloc',1,'load',{'/media/dac/DATOS-curie/HybridSearch/bdf/biosemi128.ced','filetype','autodetect'});
+
+chans =  {EEG.chanlocs.labels};
+
+chan = {'A12','A11','A13','A14','A26','A27'};
+
+
+variable2plot =  {'Intercept'  hipothesis } %'StandFixRank_VSNT_EX' 'StandFixRank_isEX'}
+i=1
+    times   = variableStruct.times; 
+
+for ifig = 1:6
+    figN = 102 + ifig;
+    figure(figN); clf
+    i = chan(ifig)
+    cha = find(ismember(chans},chan{i}));
+
+    ch = cha(i);
+    
+    for var = 1:length(variable2plot)
+        struct(var).x = []
+    end
+    for iSuj = 1:17
+        for var = 1:length(variable2plot)
+            struct(var).x = [struct(var).x; variableStruct(iSuj).(variable2plot{var})(ch,:)];
+        end
+    end
+    
+    for var = 1:length(variable2plot)
+        struct(var).X = squeeze(mean(struct(var).x,1));
+        struct(var).eX = squeeze(std(struct(var).x,0,1))/sqrt(size(struct(var).x,1));
+        struct(var).base = mean(struct(var).X(-.2<times & times<0));
+        if baselineCorr==1
+            struct(var).X = struct(var).X - struct(var).base
+        end
+        chan{i}
+    end   
+
+    ylabel(strcat(chan{i},' [\muV]'),'FontSize',22) 
+
+    box on                                    
+    hold on
+    %title(chan{i})   
+    
+    for var = 1:length(variable2plot)
+        struct(var).ylim = max([abs(max(abs(struct(var).X-struct(var).eX),[],'all')),abs(max(abs(struct(var).X+struct(var).eX),[],'all'))]);
+    end
+ 
+    ylim_ = max([struct.ylim])
+    YLIMI = [-ylim_-ylim_/2 ylim_];
+    
+    colors = {'k-' 'r-' 'g-' 'b-' 'y-'};
+    x = [times,     times(end:-1:1),            times(1)];
+    for var = 1:length(variable2plot)
+        y = [struct(var).X+struct(var).eX,    struct(var).X(end:-1:1)-struct(var).eX(end:-1:1), struct(var).X(1)+struct(var).eX(1)];
+        patch(x,y,colors{var},'EdgeColor','none','FaceAlpha',0.5)
+    end
+
+    h = [];
+    hlegend = [];
+    for var = 1:length(variable2plot)
+        h(var) = plot(times,struct(var).X,colors{var},'LineWidth',3,'DisplayName',variable2plot{var});
+        hlegend = [hlegend h(var)];
+%         if TFCEbar
+%             if ~strcmp(variable2plot{var},'Intercept')
+%                 if sum(strcmp(variable2plot,'Intercept'))>0
+%                     p_block = find([tfce{var-1,1}.P_Values(ch,:)]<0.05);
+%                 else
+%                     p_block = find([tfce{var,1}.P_Values(ch,:)]<0.05);
+%                 end
+%                 difp = diff(p_block);
+%                 indcut=1;
+%                 for j = 1:length(difp)
+%                     if difp(j) ~= 1
+%                         indcut = [indcut j];
+%                     end
+%                 end
+%                 indcut = [indcut length(difp)];
+%                 if sum(strcmp(variable2plot,'Intercept'))>0
+%                     Y = tfce{var-1,1}.P_Values(ch,:); Y(Y>0.05)=1;
+%                 else
+%                     Y = tfce{var,1}.P_Values(ch,:); Y(Y>0.05)=1;
+%                 end
+%                 imagesc(times(-99<times & times<1000*XLIMI(2)-1),[-5.5 -5.3],Y(find(-99<times & times<1000*XLIMI(2)-1)),[0 0.05]); colormap hot;
+%                 if ~freqFilteredEEG
+%                     imagesc(times(-99<times & times<1000*XLIMI(2)-1),[-5 -4.5],Y(find(-99<times & times<1000*XLIMI(2)-1)),[0 0.05]); colormap hot;
+%                 end
+%             end
+%         end
+    end
+
+    ax=gca;
+    ax.FontSize = 18; 
+
+    hold off
+
+    a = get(gca,'XTickLabel');
+    xlabel('time [s]','FontSize',18);
+    xlim([-0.1,0.4])
+    ylim([-6,6])
+    xline(0,'-k','linewidth', 3)
+    yline(0,'-k','linewidth', 3)
+    set(gca, 'PlotBoxAspectRatio', [1,1,1],'linewidth', 3)
+    get(gca)
+end    
+%%
+
+%     EEG = pop_chanedit(EEG, 'lookup', chanlocsFilePath);                                                  
+%             EEG = eeg_checkset(EEG);
+
+
+
+ 
+ %% segunda figura FRP grand average
+ erpmat = [];%zeros(128,300);
+ tmp = [];%zeros(128,300,length([1:9 11:17]));
+ i =1
+ for a = [1:9 11:17]
+    tmp(:,:,i) = ERPstruct(a).fixepoch;
+    i = i +1;
+ end
+ erpmat = mean(tmp,3);
+ 
+ figure(200)
+sgtitle('Grand average')
+for a = [1:9 11:17]
+    %subplot(4,5,a)
+    for c = 1
+        hold on
+        plot(EEG.times, erpmat) 
+        title(names{a}(1:4))
+    end
+        %legend('95','78','9','38')
+
+    xlabel('Time [ms]')
+    ylabel('Amplitude [\mu V]')
+    
+end
+ set(gcf,'Color','w');
+ %% figura gran AV con cabezas (figura 4 informe)
+ 
+EEG.data = erpmat;
+EEG.trials = 1;
+figure; pop_timtopo(EEG, [-200  298], [80  150  230], 'ERP data and scalp maps of fixs and conditions epoch');
+set(gcf,'Color','w');
+savefig('/media/dac/DATOS-curie/HybridAnalysis/AUX/grad_average_FRP')
+ 
+%% tabla 
+Subject = [];
+Fixs = [];
+Porc = [];
+for i = [1:9 11:17]
+    Subject  = [Subject; names{i}(1:4)];
+    Fixs = [Fixs; ERPstruct(i).Nfixs];
+    Porc = [Porc; ERPstruct(i).Nfixs/ERPstruct(i).Ntotal]; 
+end
+
+
+patients = table(Subject,Fixs,Porc)
+
+
+%% Plot
+close all
+times   = ERPstruct(1).times(1:end-1);
+chanlocs= ERPstruct(1).chanlocs;
+Nsuj    = length(ERPstruct);
+
+%% TOPOs + FRPs version poster
+%cond = {'dis_F','dis_O','p values'}; % Target vs Distractor Objects
+%cond = {'tar_F','tar_O','p values'}; % Target vs Distractor Objects
+%cond = {'tar_up','tar_inv','p values'}; % Target vs Distractor Objects%
+
+%cond = { 'NTO_hard' 'NTO_easy'  'p values'}
+%cond = {'NTF_easy' 'NTF_hard' 'p values'}
+%cond = {'TU' 'TI' 'p values'}
+%cond = {'NTF' 'NTO' 'p values'}
+%cond = {'NTO_todo' 'NTF_todo' 'p values'}
+%cond = {'VS_todo' 'EX_todo' 'p values'}
+%cond = {'EXO' 'EXF' 'p values'}
+%cond = {'NtEXO' 'NtEXF' 'p values'}
+cond = {'NtEXOsinI' 'NtEXFsinI' 'p values'}
+
+
+
+% LABELS
+%rows={'NTF','NTO','NTF-NTO'};
+%rows={'TFU','TFI','TFU-TFI'};
+%rows={{'NTO'  ;'easy'},{'NTO', 'hard'},'easy-hard'};
+rows={'NTO','NTF','NTF-NTO'};
+%rows={'VS','EX','EX-VS'};
+
+
+
+%cond = {'dis_FlookF','dis_FlookO'}; % Target vs Distractor Objects
+%cond = {'dist_OlookO','dist_OlookF'}; % Target vs Distractor Objects    ventanas={[85 105],[130 150],[175 195]}
+%ventanas={[80 100],[125 145],[170 190],[200 220]}%poster
+ventanas={[70 130],[145-15 155+15],[140 210],[210 230]}%poster
+
+    figure(101); clf
+    jotas = [0 4 8 ] ;
+    for j=jotas   
+        
+    for i=1:4
+            x1 = [];
+            x2 = [];
+            ventana = find(times>ventanas{i}(1) & times<ventanas{i}(2));
+             for iSuj = [1:17 19:Nsuj]
+                x1 = [x1, mean(ERPstruct(iSuj).(cond{1})(:,ventana),2)];
+                x2 = [x2, mean(ERPstruct(iSuj).(cond{2})(:,ventana),2)];
+             end
+            
+            if j==0
+                datavector = mean(x1,2); % Faces 
+            elseif j==4      
+                datavector = mean(x2,2)  %  Objects
+            elseif j== 8 
+                datavector = mean(x2,2) - mean(x1,2); % Faces - Objects
+            end
+            
+                subplot(3,4,j+i)
+                    hold on
+                    if i==1
+                        
+                        set(gca,'Visible','off');
+                        po=text(.5,.5,rows{find(jotas==j)});
+                        set(po,'Position',[-1.4,0,0],'FontSize',21);
+                    end
+                        
+                        
+                        
+                        
+            if j==0
+                 str1 = sprintf('%d ms' ,[ventanas{i}(1)])
+                 str2 = sprintf('%d ms' ,[ventanas{i}(2)])
+                 title([str1 '-' str2],'FontSize',21)%[ventanas{i}(1) ' ms' ;ventanas{i}(2) ' ms'] )
+            end
+    
+                    topoplot(datavector,chanlocs)
+                     
+                        hold off
+    end
+    end
+     cb= colorbar;
+    cb.Position = cb.Position + [.076, 0.28, 0.001, .04];
+                ylabel(cb, 'uV','FontSize',14)
+                set(gcf,'Color','w')
+
+                
+                
+                
+                
+                
+                
+                 figure(102); clf
+
+                    chan = {'PO7','Fz','PO8','TP7','CPz','TP8','P7','Pz','P8','O1','Oz','O2','F1','F2'};
+                    %cond = {'dis_F','dis_O'}; % Target vs Distractor Objects
+                    %cond = {'dist_OlookO','dist_OlookF'}; % Target vs Distractor Objects
+                    %cond = {'dis_FlookF','dis_FlookO'}; % Target vs Distractor Objects
+                    f=fields(ERPstruct);
+                    number1 = f(find(ismember(fields(ERPstruct),cond{1}))-1);
+                    number2 = f(find(ismember(fields(ERPstruct),cond{2}))-1);
+
+                    % cond = {'disF','tarF'}; % Target vs Distractor Faces
+                    YLIMI = [-6 6];
+                    XLIMI = [-100 250];
+                    yloglim = [10^-4  10^0];
+                        set(gcf,'Color','w')
+                        %erppos = {[ 1 2 5 6 9 10],[3 4 7 8 11 12],[17 18 21 22 25 26],[19 20 23 24 27 28]} ;
+                        erppos = {[ 1 3 5],[2 4 6],[9 11 13],[10 12 14]} ;
+
+                        chanplot = [13 14 10 12]%7 9]
+                        
+                        for ifig = 1:4
+                            i = chanplot(ifig)
+                                er = subplot(8,2,erppos{ifig})
+                                % boxplot(h(i))
+                                ch = find(ismember({chanlocs.labels},chan{i}));
+                                x1 = [];
+                                x2 = [];
+                                for iSuj = [1:17 19:Nsuj]%1:13
+                                    times   = ERPstruct(iSuj).times(1:end-1);
+
+                                    x1 = [x1; ERPstruct(iSuj).(cond{1})(ch,:)];
+                                    x2 = [x2; ERPstruct(iSuj).(cond{2})(ch,:)];
+                                    %keyboard
+                                end
+                                X1 = squeeze(mean(x1,1));
+                                X2 = squeeze(mean(x2,1));
+                                Xd = X2-X1;%diferencia
+                                eX1 = squeeze(std(x1,0,1))/sqrt(size(x1,1));
+                                eX2 = squeeze(std(x2,0,1))/sqrt(size(x1,1));
+                                ed = squeeze(std(Xd,0,1))/sqrt(size(Xd,1));
+
+                                
+                    %             X1 = smooth(squeeze(mean(x1,1)));
+                    %             X2 = smooth(squeeze(mean(x2,1)));
+                                               %   yyaxis right
+
+                                    ylabel(chan{i},'FontSize',22)
+                                    
+                                    %set(gcf,'defaultAxesColorOrder',[[1 1 1]; [1 1 1]]);
+                                    box on                                    
+                                    hold on
+                                    %title(chan{i})
+                       
+
+                                    x = [times,     times(end:-1:1),            times(1)];
+                                    y = [X1+eX1,    X1(end:-1:1)-eX1(end:-1:1), X1(1)+eX1(1)];
+                                    patch(x,y,'b','EdgeColor','none','FaceAlpha',0.5)
+
+                                    x = [times,     times(end:-1:1),            times(1)];
+                                    y = [X2+eX2,    X2(end:-1:1)-eX2(end:-1:1), X2(1)+eX2(1)];
+                                    patch(x,y,'r','EdgeColor','none','FaceAlpha',0.5)
+                                    
+                                    x = [times,     times(end:-1:1),            times(1)];
+                                    y = [Xd+ed,    Xd(end:-1:1)-ed(end:-1:1), Xd(1)+ed(1)];
+                                    patch(x,y,'black','EdgeColor','none','FaceAlpha',0.5)
+                                    
+                                    
+                                    
+                                    x = [ventanas{1} ventanas{1}(end:-1:1) ventanas{1}(1) ];
+                                    y = [8 8 -8 -8 8];
+                                    %patch(x,y,'black','EdgeColor','none','FaceAlpha',0.4)
+                                    
+                                    x = [ventanas{2} ventanas{2}(end:-1:1) ventanas{2}(1) ];
+                                    y = [8 8 -8 -8 8];
+                                    patch(x,y,'black','EdgeColor','none','FaceAlpha',0.4)
+
+                                    x = [ventanas{3} ventanas{3}(end:-1:1) ventanas{3}(1) ];
+                                    y = [8 8 -8 -8 8];
+                                    %patch(x,y,'black','EdgeColor','none','FaceAlpha',0.4)
+
+                                    x = [ventanas{4} ventanas{4}(end:-1:1) ventanas{4}(1) ];
+                                    y = [8 8 -8 -8 8];
+                                    %patch(x,y,'black','EdgeColor','none','FaceAlpha',0.4)
+                                    p_block = find([Results.P_Values(ch,:)]<0.05);
+                                    difp = diff(p_block);
+                                    indcut=[1];for j = 1:length(difp);if difp(j) ~= 1; indcut = [indcut j];end;end;
+                                    indcut = [indcut length(difp)];
+                                    %verde
+                                    if ~isempty(p_block)
+                                        if numel(indcut)>1
+                                        for cuts = 1:length(indcut)-1
+                                        difcu = diff(indcut) ; 
+                                        x = [times(p_block(indcut(cuts+1)-difcu(cuts)+1)) times(p_block(indcut(cuts+1))) times(p_block(indcut(cuts+1))) times(p_block(indcut(cuts+1)-difcu(cuts)+1)) times(p_block(indcut(cuts+1)-difcu(cuts)+1))];
+                                        y = [8 8 -8 -8 8];
+                                        patch(x,y,'g','EdgeColor','none','FaceAlpha',0.4)
+                                        end
+                                        else
+                                         x = [times(p_block(1)) times(p_block(end)) times(p_block(end)) times(p_block(1)) times(p_block(1))];
+                                        y = [8 8 -8 -8 8];
+                                        patch(x,y,'g','EdgeColor','none','FaceAlpha',0.4)
+                                        end
+                                    end
+                                    h = [];
+                                    h(1) = plot(times,X1,'b-','LineWidth',3);
+                                    h(2) = plot(times,X2,'r-','LineWidth',3);
+                                    h(3) = plot(times,Xd,'black-','LineWidth',3);
+                                    
+                                    plot([0 0],YLIMI,'k-')
+                                    plot(XLIMI,[0 0],'k-')
+
+                                hold off
+
+                                set(gca,'YLim',YLIMI,'XLim',XLIMI,'fontsize',15)
+                                currentPos = get(er,'Position');
+                                set(er,'Position',currentPos - [0,0,0,0.055])
+                                %str = sprintf('%s # %d  fixs - %s # %d fixs, 20 subjects', [cond{1}(1:3) ' ' cond{1}(5:8)]...
+                                 % ,sum([ERPstruct.(number1{1})]), [cond{1}(1:3) ' ' cond{1}(5:8)],sum([ERPstruct.(number2{1})]));
+                                    str = sprintf('%s with %d  fixations and %s with %d fixations, 20 subjects', [cond{1}(1:3)]...
+                                    ,sum([ERPstruct.(number1{1})]), [cond{2}(1:3)],sum([ERPstruct.(number2{1})]));
+                                %str2=sprintf('FRPs for non-target stimuli')% NTO and NTF
+                                str3=sprintf('FRPs for VS and EX') %  NTO easy and hard stimuli'
+
+                                pp =suptitle(str3)
+                                set(pp,'FontSize',22)
+
+                                if (i==12); legend(h,[[cond{1}(1:5) ]; [cond{2}(1:5) ]; "diff"]); end;  %hard and easy [cond{1}(5:8); cond{2}(5:8); 'diff']
+                                %ppos = {[ 13 14],[15 16],[29 30],[31 32]};
+                                %if (i==3); legend(h,[[cond{1}(1:3)]; [cond{2}(1:3)]; "diff."]); end  %hard and easy [cond{1}(5:8); cond{2}(5:8); 'diff']
+
+                                ppos = {[ 7],[8],[15],[16]};
+
+                                ind = ppos{ifig};    
+                                pplot=subplot(8,2,ppos{ifig})
+                      
+                                pplot.YScale= 'log' 
+                                currentPos = get(pplot,'Position');
+                                set(pplot,'Position',currentPos - [0,-0.01,0,.03])
+                               
+
+                                semilogy(times(Results.P_Values(ch,:)<0.05),Results.P_Values(ch,Results.P_Values(ch,:)<0.05),'.','MarkerSize',4,'Color',[0 0 0]);
+                                hold on
+
+                         
+                                
+                                box on
+                                semilogy(times(Results.P_Values(ch,:)>0.05),Results.P_Values(ch,Results.P_Values(ch,:)>0.05),'.','MarkerSize',4,'Color',[0.6 0.6 0.6]);
+
+                                semilogy(times,ones(1,numel(times)).*0.05,'-','LineWidth',2,'Color',[.5 .5 .5]);
+
+
+                                hold off
+                                
+                                set(pplot,'YLim',yloglim,'XLim',XLIMI)
+                                a = get(gca,'XTickLabel');
+                                set(gca,'XTickLabel',a,'fontsize',9)  
+                                if ind >14 ;xlabel('Time (ms)','FontSize',22);end;
+
+                        end        
+
+%% check subjects FRPs for all fixations
+
+close all
+times   = ERPstruct(1).times(1:end-1);
+chanlocs= ERPstruct(1).chanlocs;
+Nsuj    = length(ERPstruct);
+
+
+EEGtmp = EEG;
+chan = {'O2','O1'}%{'AF3', 'AF4'}%,'Cz','Pz','Oz'};
+YLIMI = [-6 6];
+XLIMI = [min(times) 400];
+figure();  set(gcf,'Color','w');
+times   = ERPstruct(1).times(1:end);%EEGtmp.times;
+chanlocs= EEGtmp.chanlocs;
+ x1 = [];
+ x2=[];
+ for i = 1:Nsuj
+     
+  subplot(4,5,i)
+ch1 = find(ismember({chanlocs.labels},chan{1}));
+ch2 = find(ismember({chanlocs.labels},chan{2}));
+
+hold on
+   title([ERPstruct(i).Suj ' ' chan{1} ' ' chan{2}])
+   
+x1 = ERPstruct(i).fixepoch(ch1,:);%mean(EEGtmp.data(ch,:,:),3);
+x2 = ERPstruct(i).fixepoch(ch2,:);%mean(EEGtmp.data(ch,:,:),3);
+
+h(1)= plot(times,x1,'LineWidth',2);
+h(2)= plot(times,x2,'LineWidth',2);
+
+ set(gca,'YLim',YLIMI,'XLim',XLIMI)
+ hold off
+  if (i==Nsuj); legend(h,chan); end
+%x1 = [x1; EEGtmp.data(ch,:,:)];
+ end
+%X1 = squeeze(mean(x1,1));  
+
+
+
+%% 1 STEP Alternative analysis: adding fix and trials to each subject EEG file. FAces Vs OBJ
+inFolder                =  session_path.data_analysis;
+fp.cfg.subjname         =  session_path.subjname;
+fp.cfg.sessionfilenames = session_path.sessionfilenames;
+fp.cfg.matdir           = matdir;
+folderOut               = session_path.conditions_data ;
+
+names = fp.loadSubjects(inFolder, 1, 1, 'set');
+%names = names([1:10 13:end])%agregado 14/2/20
+%condVec = {'_dis_F.set' '_dis_O.set' '_tar_up.set' '_tar_inv.set'}
+%condVec = {'_NTO_easy.set' '_NTO_hard.set' '_NTF_easy.set' '_NTF_hard.set'}
+condVec = {'_NTF.set' '_NTO.set' '_TU.set' '_TI.set'}
+
+dur1=[];
+dur2=[];
+dur3=[];
+for iSuj = [1:4 6:11 13:19 21:23]%subjects with correct scanpath%[1:4 6:11 15:17]%[12:15]%15:length(names)
+    
+    fp.cfg.inFile = [inFolder names{iSuj}];
+
+
+   [EEG fixs trials ExpTrials]   = fp.fixationsAnalysisOne() %Here is when mat files for each subject  is required Joe series problem.
+
+
+    suj = names{iSuj}; sujName = suj(7:end-13);
+
+ 
+    fp.cfg.outFile = [ folderOut  sujName '_fixEpoch.set' ]; 
+    durMinFix = 0.25;
+
+
+    [tmp1 tmp2 tmp3 ]= fp.fun_conditionHistogramInd(EEG, fixs, durMinFix);%analysis made so far was at .28 
+       
+
+dur1 = [dur1 tmp1]
+dur2 = [dur2 tmp2]
+dur3 = [dur3 tmp3]
+ 
+%26/02 epocheado para distractores en todas las condiciones caras vs
+%objetos y para targets solo VS correctos  detalles en (indexCondEpoch)
+
+end
+
+%dur1norm =  dur1/sum(dur1);
+
+h =histogram(dur3*1000,'Normalization','probability'); 
+   
+%plot(xh,yh,'k--')
+
+%  h3 =histogram(ytargetvs,25);  ytargetvs = ytargetvs/sum(ytargetvs);
+%h.BinLimits = [0 2500]
+h.NumBins = 45
+
+
+title('Fixation duration for NTF-NTO','FontSize',22)
+xlabel('Time [ms]','FontSize',22)
+ylabel('normalized # of fixations','FontSize',22)
+%legend( 'targets', 'distractors')
+
+ set(gcf,'Color','w')
+ set(gca, 'FontSize',22)
+%% Functions 
+
+function ERPstruct  = fun_makeStructToERPunfold(ERPstruct,variablesOI,iSuj,suj,result,hipothesis)
+    
+
+    ERPstruct(iSuj).times    = result.times;
+    ERPstruct(iSuj).Suj      = suj;
+%     if sum(contains(variablesOI, hipothesis))>0
+%         cond = split(hipothesis,'_');
+%         ERPstruct(iSuj).(['n_' cond{1}]) = result.N.(cond{1});
+%         ERPstruct(iSuj).(['n_' cond{2}]) = result.N.(cond{2});
+%     end
+
+    for var = 1:length(variablesOI)
+        covariate             = find(ismember(result.variablenames,variablesOI{var}));
+    %                     if sum(covariate)~=1
+    %                         fprintf('unmatch or repeted variable')
+        if strcmp(variablesOI{var},'(Intercept)')
+            ERPstruct(iSuj).Intercept = result.beta_dc(:,:,covariate);    
+        else
+            if contains(variablesOI{var},':')
+                lala = replace(variablesOI{var},':','_');
+                ERPstruct(iSuj).(lala) = result.beta_dc(:,:,covariate);
+            else
+                ERPstruct(iSuj).(variablesOI{var}) = result.beta_dc(:,:,covariate);      
+            end
+        end  
+    end
+end
+        
+function tfceResult  = fun_runTFCE(fp,folder,variableStruct,variable,chanlocs)
+    TFCEvars = fieldnames(variableStruct);
+    data1 = [];
+    
+    if strcmp(variable,'(Intercept)')
+        variable = 'Intercept';
+    end
+    var = find(ismember(TFCEvars,variable));
+    for iSuj = 1:length(variableStruct)
+       data = variableStruct(iSuj).(TFCEvars{var});
+       data1= cat(3,data1,data);
+    end
+    data1 = permute(data1,[3 1 2]);
+    Summary = data1;
+
+    % save([folder '/data1'],'Summary')
+    data2 = zeros(size(data1));
+
+    tfceResult = fp.ept_TFCE(data1,data2,chanlocs,'nPerm',2000, 'type','d', 'rSample',512);
+    %tfceResult = fp.ept_TFCE()
+    
+    save([folder '/tfceResults_' variable],  'tfceResult')
+end
+
+function variableStruct = fun_applyBaselineCorrection(variableStruct,variable,freqFilteredEEG)
+    
+    TFCEvars = fieldnames(variableStruct);    
+    if strcmp(variable,'(Intercept)')
+        variable = 'Intercept';
+    end
+    var = find(ismember(TFCEvars,variable));                
+    for iSuj = 1:numel(variableStruct)
+          times   = variableStruct(iSuj).times;
+
+          x1 = variableStruct(iSuj).(TFCEvars{var});
+
+          base1 = mean(x1(:,min(times)<times & times<0),2);
+          
+          x1    = x1-base1;      
+          
+          variableStruct(iSuj).(TFCEvars{var})=  x1;           
+    end
+end
+

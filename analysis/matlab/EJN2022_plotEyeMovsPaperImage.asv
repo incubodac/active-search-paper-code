@@ -1,0 +1,945 @@
+%% Load environment
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 3/6/21 DAC                                    %   
+% 9/6/21 modified by MDF                        %
+% 10/11/22 modified by JEK from Unfold2021_v3.m %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+clc
+clear all
+close all
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+who_is_running = 'J'; % 'M': Maria or Damian or Juan % jek 10/11/22
+sanity_checks = 0; 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+if strcmp(who_is_running,'M')
+    cd  /home/cbclab/Documents/gitlab_liaa/corregistro/Analysis_dac/functions
+elseif strcmp(who_is_running,'D')
+    cd /Users/dac/Documents/GitLab/corregistro/Analysis_dac/functions   % mdf 8/6/21 DAC directory
+elseif strcmp(who_is_running,'J')
+    cd /home/juank/Desktop/EJN2022/matlab/                              % jek 10/11/22
+end
+
+if strcmp(who_is_running,'M');      addpath(genpath('/home/cbclab/Documents/gitlab_liaa/corregistro/Analysis_dac/UNFOLD'))
+elseif strcmp(who_is_running,'D');  addpath(genpath('/Users/dac/Documents/GitLab/corregistro/Analysis_dac/UNFOLD')) % mdf 8/6/21 DAC directory
+elseif strcmp(who_is_running,'J');  addpath(genpath('/home/juank/repos/corregistro/Analysis_dac/UNFOLD'))           % jek 10/11/22
+end
+
+[runpath,code_path,session_path,whoisrunning]=add_paths_EEG_ET_beta(0,'J');% edited by jek 10/11/22
+addpath(code_path.eeglabpath); 
+eeglab
+
+addpath(code_path.toolbox); 
+addpath(genpath(code_path.corregistro_fn));
+addpath(code_path.my_functions);
+clear fp; fp = FP_epochAnalysis();
+
+folderIn            =  session_path.data_analysis;
+matdir              = session_path.matfiles;
+suj                 =  session_path.subjname;
+
+sessionfilenames = session_path.sessionfilenames;
+names = loadSubjects(folderIn, 1, 1, 'set');
+subjectnames = fp.fn.loadSubjects(matdir, 1, 1, 'mat');
+
+%%
+fixs        = [];
+trials      = [];
+allsac      = [];
+allfix      = [];
+allfixex    = [];
+allfixvs    = [];
+alltarg     = []; 
+alldist     = []; 
+allsacex    = [];
+allsacvs    = [];
+
+includedSubjects =   {'E01', 'E03', 'E04', 'E05', 'E12', ...
+                        'E14', 'J03', 'J04', 'J08', 'J11', ...
+                        'J12', 'E08', 'E09', 'E10', 'E07', ...
+                        'E11'};
+
+for iSuj = 1:numel(names)
+    inFile  = [folderIn names{iSuj}];
+    name    = names{iSuj};
+    suj = name(7:9);
+
+    fprintf('Starting participant %d/%d: %s\n',iSuj,numel(names),suj);
+
+    allsac_tmp      = [];
+    allfix_tmp      = []; 
+    allfixvs_tmp    = [];
+    allfixex_tmp    = [];
+    alltarg_tmp     = []; 
+    alldist_tmp     = []; 
+    allsacvs_tmp    = [];
+    allsacex_tmp    = [];
+
+    
+    cfg = [];
+    if ismember(suj,includedSubjects)
+        fprintf('\tParticipant %d/%d: %s is included in the analysis\n',iSuj,numel(names),suj);
+
+        cfg.inFile = inFile;
+        cfg.sessionfilenames = session_path.sessionfilenames ;
+        cfg.subjname = session_path.subjname;
+        cfg.matdir = matdir ;
+
+%        addpath('/Users/dac/Documents/MATLAB/psyco')                           
+%        %[fixs_tmp trials_tmp ExpTrials] = fixationsAnalysisOne_choto(cfg)  
+        [EEG,fixs_tmp,trials_tmp,ExpTrials] = fixationsAnalysisAll(cfg);
+
+        fixs        = [ fixs, fixs_tmp ];
+        trials      = [ trials,  trials_tmp];
+        
+        %mod to separate VS and EX
+        vsvec = [];
+        exvec = [];
+
+        for j = 1:numel(ExpTrials)
+            type = ExpTrials(j).info.trialtype;
+            if strcmp(type,'VS')
+                vsvec = [vsvec j];
+            elseif strcmp(type,'EX')
+                exvec = [exvec j];
+            end
+        end
+        
+        
+        %keyboard
+        
+        for ev = 1:length(EEG.event)
+           if ismember(EEG.event(ev).epoch,vsvec)
+               EEG.event(ev).vs = 1;
+           else
+                EEG.event(ev).vs = 0;
+           end
+           if ismember(EEG.event(ev).epoch,exvec)
+              EEG.event(ev).ex = 1;
+           else
+              EEG.event(ev).ex = 0;
+           end          
+        end
+       
+      
+
+        EEG                        = pop_epoch(EEG,{'13'},[-0.2 4]);
+
+        EEG                        = eeg_checkset(EEG);    
+   
+        EEG  = eeg_epoch2continuous(EEG);
+        
+        saccIn = find(ismember({EEG.event.type},'saccade'));
+        fixIn  = find(ismember({EEG.event.type},'fixation'));
+
+        for  f = 1:length(fixIn)
+           if EEG.event(fixIn(f)).vs
+               allfixvs_tmp = [allfixvs_tmp; EEG.event(fixIn(f)).duration];
+           elseif EEG.event(fixIn(f)).ex
+               allfixex_tmp = [allfixex_tmp; EEG.event(fixIn(f)).duration];
+           end
+           allfix_tmp(f,1) =  EEG.event(fixIn(f)).duration;
+           allfix_tmp(f,2) =  EEG.event(fixIn(f)).fix_avgpos_x;
+           allfix_tmp(f,3) =  EEG.event(fixIn(f)).fix_avgpos_y;   
+        end
+        for  s = 1:length(saccIn)
+           if EEG.event(saccIn(s)).vs
+               allsacvs_tmp = [allsacvs_tmp ; [EEG.event(saccIn(s)).sac_amplitude,...
+                   EEG.event(saccIn(s)).sac_vmax, EEG.event(saccIn(s)).sac_angle]];
+           elseif EEG.event(saccIn(s)).ex
+               allsacex_tmp = [allsacex_tmp ; [EEG.event(saccIn(s)).sac_amplitude,...
+                   EEG.event(saccIn(s)).sac_vmax ,EEG.event(saccIn(s)).sac_angle]];
+           end
+           allsac_tmp(s,1) =  EEG.event(saccIn(s)).sac_amplitude;
+           allsac_tmp(s,2) =  EEG.event(saccIn(s)).sac_vmax;
+           allsac_tmp(s,3) =  EEG.event(saccIn(s)).sac_angle;   
+        end
+        % loop for targets and distractor duration
+        for f = 1:length(fixs)
+           if strcmp(fixs(f).trial_type,'VS') && fixs(f).istarget 
+            alltarg_tmp  = [alltarg_tmp; fixs(f).dur_added];
+           elseif strcmp(fixs(f).trial_type,'VS') && fixs(f).isdistractor
+            alldist_tmp  =[alldist_tmp; fixs(f).dur_added];
+           end
+        end
+        allsac                  = [allsac ;allsac_tmp];
+        allfix                  = [allfix ;allfix_tmp];
+        allfixex                = [allfixex; allfixex_tmp];
+        allfixvs                = [allfixvs; allfixvs_tmp];
+        alltarg                 = [alltarg; alltarg_tmp];
+        alldist                 = [alldist; alldist_tmp];
+        allsacex                = [allsacex; allsacex_tmp];
+        allsacvs                = [allsacvs; allsacvs_tmp];
+
+    end
+end
+
+
+
+
+folderOut   = ['/Users/dac/Documents/GitLab/corregistro/Analysis_dac' '/examples/'];;  
+
+
+
+
+
+
+      %% display settings
+POINTSPERBIN_1D = 50; % bin width for bar plots (avg. cases per bin) %modified original value wa 1000
+POINTSPERBIN_2D =  50; % bin width for "heatmap" (avg. cases per bin) 
+MARKER          =  3; % point size in scatterplots
+         metric = 'deg';                                         
+    
+% 1: saccade amplitude distribution (histogram)
+fsize = 15
+n_obs = length(allsacvs(:,1));
+
+if n_obs > POINTSPERBIN_1D
+    nbin_1d = round(n_obs/POINTSPERBIN_1D);
+else
+    nbin_1d = n_obs;
+end
+
+rows = 3;
+
+subplot(rows,3,1); hold on; title('VS saccades','fontsize', fsize)
+[n edges] = hist(allsacvs(:,1),nbin_1d); n=n/sum(n);
+fprintf('bin size for vs amp %d \n',mean(diff(edges)))
+%bar(edges,n)
+plot(edges,n,'LineWidth',2)
+xlabel(sprintf('Amplitude [%s]',metric));
+ylabel('Probability')
+box on
+set(gca, 'FontSize',fsize,'Xlim',[0 10])
+
+% 2: main sequence (scatterplot) VS
+subplot(rows,3,2);
+loglog(allsacvs(:,1),allsacvs(:,2),'.','markersize',MARKER)
+xlabel(sprintf('Amplitude [%s]',metric));
+ylabel(sprintf('Peak velocity [%s/s]',metric));
+box on
+title('VS main sequence','fontsize', fsize)
+set(gca, 'FontSize',fsize,'Xlim',[10^-1 10^2],'Ylim',[10^1 10^3])
+
+
+% 3: saccade orientation (directional histogram)
+subplot(rows,3,3);
+[t,r] = rose(allsacvs(:,3)*pi/180,36); % angle in radians, plot 10� bins
+h = polar(t,r,'-');
+hline = findobj(gca,'Type','line');
+set(hline,'LineWidth',1.2); % make line thicker
+title('VS sacc. angular histogram','FontSize',fsize)
+%polar_flipy
+%set(gca,'ydir','reverse');
+
+% 4: saccade amplitude distribution (histogram)
+n_obs = length(allsacex(:,1));
+
+if n_obs > POINTSPERBIN_1D
+    nbin_1d = round(n_obs/POINTSPERBIN_1D);
+else
+    nbin_1d = n_obs;
+end
+
+
+subplot(rows,3,4); hold on; title('EX saccades','fontsize', fsize)
+[n edges] = hist(allsacex(:,1),nbin_1d); n=n/sum(n);
+fprintf('bin size for ex amp %d \n',mean(diff(edges)))
+
+%bar(edges,n)
+plot(edges,n,'LineWidth',2)
+xlabel(sprintf('Amplitude [%s]',metric));
+ylabel('Probability')
+box on
+set(gca, 'FontSize',fsize,'Xlim',[0 10])
+
+% xlim([ prctile(sac_amp,2) prctile(sac_amp,98) ]) % do not plot extreme outliers
+
+% 5: main sequence (scatterplot) EX
+subplot(rows,3,5);
+loglog(allsacex(:,1),allsacex(:,2),'.','markersize',MARKER)
+xlabel(sprintf('Amplitude [%s]',metric));
+ylabel(sprintf('Peak velocity [%s/s]',metric));
+box on
+title('EX main sequence','fontsize', fsize)
+set(gca, 'FontSize',fsize,'Xlim',[10^-1 10^2],'Ylim',[10^1 10^3])
+
+
+% 6: saccade orientation (directional histogram)
+subplot(rows,3,6);
+[t,r] = rose(allsacex(:,3)*pi/180,36); % angle in radians, plot 10� bins
+h = polar(t,r,'-');
+hline = findobj(gca,'Type','line');
+set(hline,'LineWidth',1.2); % make line thicker
+title('EX sacc. angular histogram','FontSize',fsize)
+
+
+subplot(rows,3,8);
+
+y = [alltarg]*1000;
+
+ytar    = [alltarg]*1000 ;%durations for target fixs 
+ydist   = [alldist]*1000 ;%durations for target fixs from correct answers VS 
+ytar  = ytar( (ytar>100)&(ytar<1000));
+ydist  = ydist( (ydist>100) & (ydist<1000));
+
+%4: fixation durations (histogram)
+
+hold on; title('VS fixations','fontsize', fsize)
+
+%Distractors
+
+[yh,xh] = hist(ydist,30); yh = yh/sum(yh);
+%bar(xh,yh,'black')
+fprintf('bin size for distractors %d \n',mean(diff(xh)))
+
+plot(xh,yh,'k-','LineWidth',2)
+
+%Targets
+
+[yh,xh] = hist(ytar,30);  yh = yh/sum(yh);
+fprintf('bin size for targets %d \n',mean(diff(xh)))
+
+%bar(xh,yh)
+plot(xh,yh,'k--','LineWidth',2)
+ax = gca;
+ax.XLim = [0 1000];
+xlabel('Fixation duration [ms]','FontSize',fsize);
+ylabel('Probability')
+box on
+set(gca, 'FontSize',fsize)
+set(gcf,'Color','w')
+    legend(  'NT','T')
+
+% 5 jhkhkhkhkhhk
+  subplot(rows,3,9); hold on; title('EX fixations','fontsize', fsize)
+  y = [fixs.dur_added]*1000;
+  yex    = y(ismember({fixs.trial_type},'EX')); 
+  yex = yex((yex>100)&(yex<1000)) ;
+
+[yh,xh] = hist(yex,30); yh = yh/sum(yh);
+fprintf('bin size for ex dur %d',mean(diff(xh)))
+
+plot(xh,yh,'LineWidth',2)
+xlabel('Fixation duration [ms]','FontSize',fsize);
+ylabel('Probability')
+
+box on
+set(gca, 'FontSize',fsize)                   
+                                    
+% 4: fixation durations (histogram)
+subplot(rows,3,7); hold on; title('All fixations','fontsize', fsize)  
+fix_dur = allfix( ([allfix(:,1)]>100) & ([allfix(:,1)]<1000),1) ;
+
+% [n edges] = hist(fix_dur,30); n= n/sum(n);
+[n edges] = hist(cat(1,yex', ytar,ydist),30); n= n/sum(n);
+
+fprintf('bin size for fixation dur %d',mean(diff(edges)))
+
+%bar(edges,n)
+
+plot(edges, n,'LineWidth',2)
+xlabel('Fixation duration [ms]','FontSize',fsize);
+ylabel('Probability')
+box on
+set(gca, 'FontSize',fsize)              
+set(gcf,'Color','w')
+   
+%%
+yall = cat(1,yex', ytar,ydist);
+Data = [[mean(ytar)    std(ytar)      median(ytar)      max(ytar)         numel(ytar)];
+        [mean(ydist)   std(ydist)     median(ydist)     max(ydist)        numel(ydist)];
+        [mean(yex)     std(yex)       median(yex)       max(yex)          numel(yex)];
+        [mean(yall)    std(yall)      median(yall)      max(yall)         numel(yall)]]
+    
+VarNames = {'mean', 'std','median', 'max','Set_size'};
+
+T = table(Data(:,1),Data(:,2),Data(:,3),Data(:,4),Data(:,5),'VariableNames',VarNames, 'RowNames', {'targ', 'non_targ', 'ex', 'all'})
+                   
+                   
+%% funciones 
+
+
+function [fixs trials ExpTrials] = fixationsAnalysisOne_choto(cfg)
+     inFile              = cfg.inFile
+     sessionfilenames    = cfg.sessionfilenames;
+     sujs           = cfg.subjname;
+     matdir              = cfg.matdir;
+       fp = FP_basePreAnalysis('dac');
+           
+            resp_cell_VS        = {'sin resp','A','P','X'};
+            resp_cell_EX_gender = {'sin resp','male','female','X'};
+            resp_cell_EX_obj    = {'sin resp','small','big','X'};
+            fixs = [];
+            trials = [];
+            tmpfix.refix     =  NaN;
+
+            name = strsplit(inFile,'/');
+             name =name{end}
+            suj = name(7:end-13);
+            
+            ind_matfile = find(ismember(sujs,suj));       
+            %keyboard
+
+            fprintf('Subject %s\n',suj)
+            sessionfilename    = sessionfilenames{ind_matfile};
+
+            matNames = fp.fn.loadSubjects(matdir, 1, 1, 'mat');
+            if sum(ismember(matNames,[sessionfilename '.mat']))==0
+                fprintf('mat file for subject %s was not found\n', suj)
+            else
+                fprintf('%s: Loading the new raw MAT file %s from %s folder\n',suj,sessionfilename,matdir)
+                load(fullfile(matdir,[sessionfilename '.mat']));
+                    if suj == 'E03' %repair
+                         ExpTrials = ExpTrials(11:end);
+                    elseif suj == 'J04'
+                        ExpTrials = ExpTrials([1:71 73:95 97:191 193:215]);
+                    elseif suj == 'J09'
+                        ExpTrials = ExpTrials([1:23 49:215]);
+                    elseif suj == 'J10'
+                        ExpTrials = ExpTrials([1:95 98:215]); %10648 urevent from missing trial so im changin ([1:95 97:215]) cause first trial secondSEgment got lost 
+                    elseif suj == 'J08'
+                        ExpTrials = ExpTrials([1:23 25:167]);
+                    elseif suj == 'J07'
+                        ExpTrials = ExpTrials([1:23 25:215]);
+                    elseif suj == 'J05'
+                        ExpTrials = ExpTrials([ 1:47 49:95 97:143  145:215]);
+                    end
+            end
+            EEG = pop_loadset(inFile);
+            % Keep 'saccade' and 'fixation' events only
+            event = EEG.event;    
+        
+        
+    %me quedo con la deteccion de Engbert
+    event(ismember({event.type},{'R_blink','R_saccade','bad_ET','R_fixation','R_saccade'})) = [];
+    eyemap_events = {'211' '212' '221' '222' '231' '232' '241' '242' '251' '252' '290' '300'};
+    event(ismember({event.type},eyemap_events)) = [];
+    other_events = {'1' '11' '12' '15' '16' '17' '100' '101' '150' '160' '170' '180' '200'};
+    event(ismember({event.type},other_events)) = [];
+    %unique({event.type})
+    eyedata = fun_parse_eyedata_EEG_beta_choto(EEG,ExpTrials);
+    %keyboard
+    for tr = 1:length(eyedata) %trials
+        C = NaN;%agregado para intentar arreglar J03 etc
+
+        if eyedata(tr).Nfix>0
+            %try
+            [cat,atr,resp]= fun_extract_attributes_target_choto(ExpTrials(tr));
+            %catch e
+            %    fprintf(e.identifier)
+                %keyboard
+            %end
+            if strcmp(ExpTrials(tr).info.trialtype,cfg.tasks{1});%(VS)
+                   C = strcmp(resp_cell_VS{ExpTrials(tr).resp.key+1} , resp);
+            elseif strcmp(ExpTrials(tr).info.trialtype,cfg.tasks{2})%(EX)
+                if strcmp(cat,'objects');
+                   C = strcmp(resp_cell_EX_obj{ExpTrials(tr).resp.key+1} , atr);
+                elseif strcmp(cat,'faces');
+                   C = strcmp(resp_cell_EX_gender{ExpTrials(tr).resp.key+1} , atr);
+                end
+            end
+
+            % Struct fixs (all subjects)
+            k = 1;
+            tmp = 0;
+            tmpdur=[];
+            [vec_succesiv ind_suc mask] = fun_detect_succesive_fixs_choto(eyedata(tr));
+                                           %crear ayedata.fixs_added y ayadata.rel pos y abspos
+
+            for n = 1:eyedata(tr).Nfix  %fixations for tr and suj
+                tmpdur     = eyedata(tr).fixs(n,2) - eyedata(tr).fixs(n,1); 
+
+                if n<eyedata(tr).Nfix & mask(n) & eyedata(tr).stposrel(n)==eyedata(tr).stposrel(n+1) 
+                    k = k+1;
+                    tmp = tmp + tmpdur; 
+
+                else
+                    tmpfix.dur_added = tmp + tmpdur;
+                    tmpfix.multifix  = k;
+
+                    tmpfix.stposrel= eyedata(tr).stposrel(n);
+
+                    tmpfix.stposabs  = eyedata(tr).stposabs(n);
+                    if k==1
+                        tmpfix.tonset  = eyedata(tr).fixs(n,1) - eyedata(tr).t_bgn_tr;
+                    else
+                        tmpfix.tonset  = eyedata(tr).fixs(n-k+1,1) - eyedata(tr).t_bgn_tr;%chequear
+                    end
+                    tmpfix.x       = eyedata(tr).fixs(n,4); 
+                    tmpfix.y       = eyedata(tr).fixs(n,5);
+                    tmpfix.n       = n;
+                    tmpfix.urevent = eyedata(tr).fixs(n,7);   %IMPORTANTE
+                    tmpfix.istarget= eyedata(tr).fix2target(n);
+
+                    if tmpfix.stposrel~=ExpTrials(tr).info.indtarget & tmpfix.stposrel~=0 ...
+                            & (sum(ismember(ExpTrials(tr).info.indpos,tmpfix.stposrel))>0)
+
+                        [cat_dist,atr_dist] = fun_extract_dist_attributes_choto(ExpTrials(tr), tmpfix.stposrel);
+                                                %esta funcion deberia arrojar cat y atr para distractor
+
+                        tmpfix.isdistractor = 1;
+                        tmpfix.distractor_cat          = cat_dist;
+                        tmpfix.ditractor_atr           = atr_dist;
+                    else
+                        tmpfix.isdistractor = 0;
+                        tmpfix.distractor_cat          = NaN;
+                        tmpfix.ditractor_atr           = NaN;
+                    end
+                    tmp = 0;%duracion de fijaciones sucesivas
+                    k   = 1;%multifixs
+                    tmpfix.trial_targetseen     = any(eyedata(tr).fix2target);
+                    tmpfix.trial_correct        = C;                      
+                    tmpfix.trial_cat            = cat;
+                    tmpfix.trial_resp           = resp;
+                    tmpfix.trial_atr            = atr;
+                    tmpfix.trial_type           = ExpTrials(tr).info.trialtype;
+                    tmpfix.trial_cattype         = ExpTrials(tr).info.cattype;
+                    tmpfix.trial_number         = tr;
+                    tmpfix.trial_subject        = suj;
+                    %change
+
+                    fixs = [fixs, tmpfix];
+
+                end        
+            end
+            % Struct trials (all subjects)
+            if any(eyedata(tr).fix2target)
+                tmptrial.nfix2target    = find(eyedata(tr).fix2target,1,'first');
+                %analizar criterio (n al target tal que fixdur > a 
+                %el promedio de fixdur para distractores) )
+            else
+                tmptrial.nfix2target    = NaN;
+            end
+            tmptrial.Nfix           = eyedata(tr).Nfix;
+            tmptrial.targetseen     = any(eyedata(tr).fix2target);
+            tmptrial.correct        = C;
+            tmptrial.cat            = cat;
+            tmptrial.resp           = resp;
+            tmptrial.atr            = atr;
+            tmptrial.type           = ExpTrials(tr).info.trialtype;
+            tmptrial.number         = tr;
+            tmptrial.subject        = suj;
+
+            trials                  = [trials, tmptrial];
+
+            %CREO vector con las refijaciones para definir tmpfix.refix
+
+            ind         =  find([fixs.trial_number]==tr ...
+                & arrayfun( @(x)strcmp(x,suj),{fixs.trial_subject}));
+            tmp_pos_rel = [fixs(ind).stposrel];
+            tmp_refix   = zeros(size(tmp_pos_rel));
+
+            for i = 1:15
+                ind_refix = find(tmp_pos_rel==i);
+                if length(ind_refix)>1
+                    tmp_refix(ind_refix) =  1:length(ind_refix);
+                end
+            end
+            ref              = num2cell([tmp_refix]);
+           [fixs(ind).refix] = deal(ref{:});    
+
+
+        end
+
+    end 
+end
+function [EEG fixs trials ExpTrials] = fixationsAnalysisAll(cfg) % mdf 30/4/21to unpack multifixs
+    %             input:
+    %                 obj: instantiated class (obj.cfg.infile)
+    %                                         (obj.cfg.sessiongilenames)
+    %                                         (obj.cfg.subjname)
+    %
+    %             output:
+    %                    EEG: EEGLAB struct.
+    %
+    %                    fixs: struct with all relevant data about
+    %                          each fixation run for subject specified on
+    %                          cfg.
+    %
+    %                    trials: struct with all relevant data about each trial run
+    %                            for subject specified on cfg.
+    %
+    %                    ExpTrials: experimetal data.
+    %
+    %             children: 
+    % 2021-21-01 Damian Care
+    %                              
+    %
+    inFile              = cfg.inFile
+    sessionfilenames    = cfg.sessionfilenames;
+    subjname            = cfg.subjname;
+    matdir              = cfg.matdir;
+    resp_cell_VS        = {'sin resp','A','P','X'};
+    resp_cell_EX_gender = {'sin resp','male','female','X'};
+    resp_cell_EX_obj    = {'sin resp','small','big','X'};
+    fixs = [];
+    trials = [];
+    tmpfix.refix     =  NaN;
+    %
+    name = strsplit(inFile,'/');
+    name =name{end};
+    
+    %filename = [ inFolder names{iSuj}];
+    suj = name(7:end-13);
+    ind_matfile = find(ismember(subjname,suj));       
+    %  keyboard
+    fprintf('Subject %s\n',suj)
+    sessionfilename    = sessionfilenames{ind_matfile};
+
+    matNames = loadSubjects(matdir, 1, 1, 'mat');
+    if sum(ismember(matNames,[sessionfilename '.mat']))==0
+        fprintf('mat file for subject %s was not found\n', suj)
+    else
+        fprintf('%s: Loading the new raw MAT file %s from %s folder\n',suj,sessionfilename,matdir)
+        load(fullfile(matdir,[sessionfilename '.mat']));
+            if suj == 'E03' %repair
+                 ExpTrials = ExpTrials(11:end);
+            elseif suj == 'J04'
+                ExpTrials = ExpTrials([1:71 73:95 97:191 193:215]);
+            elseif suj == 'J09'
+                ExpTrials = ExpTrials([1:23 49:215]);
+            elseif suj == 'J10'
+                ExpTrials = ExpTrials([1:95 98:215]); %10648 urevent from missing trial so im changin ([1:95 97:215]) cause first trial secondSEgment got lost 
+            elseif suj == 'J08'
+                ExpTrials = ExpTrials([1:23 25:167]);
+            elseif suj == 'J07'
+                ExpTrials = ExpTrials([1:23 25:215]);
+            elseif suj == 'J05'
+                ExpTrials = ExpTrials([ 1:47 49:95 97:143  145:215]);
+            end
+    end
+    EEG = pop_loadset(inFile);
+    % Keep 'saccade' and 'fixation' events only
+    event = EEG.event;
+    %me quedo con la deteccion de Engbert
+    event(ismember({event.type},{'R_blink','R_saccade','bad_ET','R_fixation','R_saccade'})) = []; 
+    eyemap_events = {'211' '212' '221' '222' '231' '232' '241' '242' '251' '252' '290' '300'};
+    event(ismember({event.type},eyemap_events)) = [];
+    other_events = {'1' '11' '12' '15' '16' '17' '100' '101' '150' '160' '170' '180' '200'};
+    event(ismember({event.type},other_events)) = [];
+    %unique({event.type})
+    eyedata = fun_parse_eyedata_EEG_beta_choto(EEG,ExpTrials);
+    %keyboard
+    for tr = 1:length(eyedata) %trials
+        C = NaN;%agregado para intentar arreglar J03 etc
+
+        if eyedata(tr).Nfix>0
+            %try
+            [cat,atr,resp]= fun_extract_attributes_target_choto(ExpTrials(tr));
+            %catch e
+            %    fprintf(e.identifier)
+                %keyboard
+            %end
+            if strcmp(ExpTrials(tr).info.trialtype,cfg.tasks{1});%(VS)
+                   C = strcmp(resp_cell_VS{ExpTrials(tr).resp.key+1} , resp);
+            elseif strcmp(ExpTrials(tr).info.trialtype,cfg.tasks{2})%(EX)
+                if strcmp(cat,'objects');
+                   C = strcmp(resp_cell_EX_obj{ExpTrials(tr).resp.key+1} , atr);
+                elseif strcmp(cat,'faces');
+                   C = strcmp(resp_cell_EX_gender{ExpTrials(tr).resp.key+1} , atr);
+                end
+            end
+
+            % Struct fixs (all subjects)
+            % k = 1;
+            k = 0;
+            tmp = 0;
+            tmpdur=[];
+            [vec_succesiv ind_suc mask] = fun_detect_succesive_fixs_choto(eyedata(tr));
+                                           %crear ayedata.fixs_added y ayadata.rel pos y abspos
+            % keyboard;
+            multi_n = 1;
+            for n = 1:eyedata(tr).Nfix  %fixations for tr and suj
+                tmpdur     = eyedata(tr).fixs(n,2) - eyedata(tr).fixs(n,1); 
+
+                if n<eyedata(tr).Nfix & mask(n) & eyedata(tr).stposrel(n)==eyedata(tr).stposrel(n+1) 
+                    % multifix
+                    k = k+1;
+                    tmpfix.multifix  = k;
+                    tmpfix.multi_n = multi_n;
+                else
+                    if k>0
+                        tmpfix.multifix  = k+1;
+                        tmpfix.multi_n = multi_n;
+                        multi_n = multi_n + 1;
+                    else
+                        tmpfix.multi_n = 0;
+                        tmpfix.multifix  = k;
+                    end
+                    k = 0;
+%                             if n<eyedata(tr).Nfix & mask(n) & eyedata(tr).stposrel(n)==eyedata(tr).stposrel(n-1) 
+%                                 tmpfix.multifix  = k+1;
+%                             else
+%                                 tmpfix.multifix  = 1;
+%                             end
+                end 
+                tmpfix.dur_added = tmpdur;
+                tmpfix.tonset  = eyedata(tr).fixs(n,1) - eyedata(tr).t_bgn_tr;%chequear
+                tmpfix.urevent = eyedata(tr).fixs(n,7);  
+                tmpfix.n       = n;
+                tmpfix.x       = eyedata(tr).fixs(n,4); 
+                tmpfix.y       = eyedata(tr).fixs(n,5);
+                tmpfix.istarget= eyedata(tr).fix2target(n); 
+                tmpfix.stposrel= eyedata(tr).stposrel(n);
+                tmpfix.stposabs  = eyedata(tr).stposabs(n);
+                tmpfix.stposrel= eyedata(tr).stposrel(n);
+                tmpfix.stposabs  = eyedata(tr).stposabs(n);
+                tmpfix.trial_targetseen     = any(eyedata(tr).fix2target);
+                tmpfix.trial_correct        = C;                      
+                tmpfix.trial_cat            = cat;
+                tmpfix.trial_resp           = resp;
+                tmpfix.trial_atr            = atr;
+                tmpfix.trial_type           = ExpTrials(tr).info.trialtype;
+                tmpfix.trial_cattype         = ExpTrials(tr).info.cattype;
+                tmpfix.trial_number         = tr;
+                tmpfix.trial_subject        = suj;
+                tmpfix.trial_bgn_latency    = eyedata(tr).t_bgn_tr;
+
+                if tmpfix.stposrel~=ExpTrials(tr).info.indtarget & tmpfix.stposabs~=0 ...
+                        & (sum(ismember(ExpTrials(tr).info.indpos,tmpfix.stposabs))>0)
+
+                    [cat_dist,atr_dist] = fun_extract_dist_attributes_choto(ExpTrials(tr), tmpfix.stposabs);
+                                            %esta funcion deberia arrojar cat y atr para distractor
+
+                    tmpfix.isdistractor = 1;
+                    tmpfix.distractor_cat          = cat_dist;
+                    tmpfix.ditractor_atr           = atr_dist;
+                else
+                    tmpfix.isdistractor = 0;
+                    tmpfix.distractor_cat          = NaN;
+                    tmpfix.ditractor_atr           = NaN;
+                end
+
+                fixs = [fixs, tmpfix];
+
+            end
+            % Struct trials (all subjects)
+            if any(eyedata(tr).fix2target)
+                tmptrial.nfix2target    = find(eyedata(tr).fix2target,1,'first');
+                %analizar criterio (n al target tal que fixdur > a 
+                %el promedio de fixdur para distractores) )
+            else
+                tmptrial.nfix2target    = NaN;
+            end
+            tmptrial.Nfix           = eyedata(tr).Nfix;
+            tmptrial.targetseen     = any(eyedata(tr).fix2target);
+            tmptrial.correct        = C;
+            tmptrial.cat            = cat;
+            tmptrial.resp           = resp;
+            tmptrial.atr            = atr;
+            tmptrial.type           = ExpTrials(tr).info.trialtype;
+            tmptrial.number         = tr;
+            tmptrial.subject        = suj;
+
+            trials                  = [trials, tmptrial];
+
+            %CREO vector con las refijaciones para definir tmpfix.refix
+
+            ind         =  find([fixs.trial_number]==tr ...
+                & arrayfun( @(x)strcmp(x,suj),{fixs.trial_subject}));
+            tmp_pos_rel = [fixs(ind).stposrel];
+            tmp_refix   = zeros(size(tmp_pos_rel));
+
+            for i = 1:15
+                ind_refix = find(tmp_pos_rel==i);
+                if length(ind_refix)>1
+                    tmp_refix(ind_refix) =  1:length(ind_refix);
+                end
+            end
+            ref              = num2cell([tmp_refix]);
+           [fixs(ind).refix] = deal(ref{:});    
+
+
+        end
+
+    end 
+end
+
+
+function eyedata                                        = fun_parse_eyedata_EEG_beta_choto(EEG,ExpTrials)
+    %2020edit
+    % Eye Movements
+    % Then I can check for sustained fixations during Target presentation, 
+    % fixation period, and retain period, or eye movements in the eyemap
+    % periods
+
+    padding_pre     = 0;
+    padding_post    = 0;
+
+    event = EEG.event;
+
+    indini = find(ismember({event.type},{'13'}));
+ 
+
+    t_bgn = [event( indini).latency]'/EEG.srate;
+    t_end = [event( indini).latency]'/EEG.srate + EEG.xmax;
+
+
+    eyedata = [];
+
+
+    indfix = ismember({event.type},{'fixation'});
+
+
+    fixEEG = [[event(indfix).latency]'/EEG.srate,...                            %onset
+             ([event(indfix).latency]'+ [event(indfix).duration]')/EEG.srate,...%offset
+             [event(indfix).duration]'/EEG.srate,...                            %duration
+             [event(indfix).fix_avgpos_x]',[event(indfix).fix_avgpos_y]',...    %position x and y
+             [event(indfix).fix_avgpupilsize ]',...                             %pupil
+             [event(indfix).urevent ]'];                                        %urevent
+
+
+    if length(ExpTrials) == sum(ismember({EEG.event.type},{'13'}))
+        for tr = 1:length(ExpTrials)
+            indtr = [];
+            info = ExpTrials(tr).info;         
+
+            % fix: t_start t_end dur x_medio y_medio pupila_medio
+            indfix_tr = [event(indfix).epoch]==tr & strcmp({event(indfix).type},'fixation')... belongs to trial tr and is a fixation
+                & t_bgn(tr)*EEG.srate + padding_pre  <[event(indfix).latency] &... %fall within trial 
+                t_end(tr)*EEG.srate>[event(indfix).latency]; 
+            Nfix      = sum(indfix_tr);
+            if (Nfix>0)
+                fixations   = nan(Nfix, size(fixEEG,2));
+                for i = 1:sum(indfix_tr)
+                    indtr = find(indfix_tr);
+                    fixations(i,:)  = fixEEG(indtr(i),:);
+                    %keyboard
+                end
+    % Complete for saccades
+
+                xpos = fixations(:,4);
+                ypos = fixations(:,5);
+                stposrel = zeros(Nfix,1);
+                stposabs = zeros(Nfix,1);
+                for j = 1:Nfix
+                    for i = 1:length(info.dstRects)
+                        if IsInRect(xpos(j),ypos(j),info.dstRects(:,i))  
+                            stposrel(j) = info.indpos(i);
+                            stposabs(j) = info.indpos(i);
+                            break;
+                        end
+                    end
+                end
+
+                if (info.indtarget>0)
+                    fix2target = zeros(Nfix,1);
+                    for j = 1:Nfix
+                        fix2target(j) = IsInRect(xpos(j),ypos(j),info.recttarget);
+                    end
+                else
+                    fix2target = zeros(Nfix,1);
+                end
+
+                eyedata(tr).Nfix      = Nfix;
+                eyedata(tr).fixs      = fixations;
+                %eyedata(tr).Nsac      = Nsac;
+                %eyedata(tr).sacs      = saccades;
+                eyedata(tr).stposrel  = stposrel;
+                eyedata(tr).stposabs  = stposabs;
+
+                eyedata(tr).fix2target= fix2target;
+                eyedata(tr).t_bgn_tr = t_bgn(tr);
+      
+            else
+           
+
+                eyedata(tr).Nfix      = Nfix;
+                eyedata(tr).fixs      = [];
+         
+                eyedata(tr).stposrel  = [];
+                eyedata(tr).stposabs  = [];
+                eyedata(tr).fix2target= [];
+                eyedata(tr).urevent    = [event(find(indfix)).urevent];%para agregar luego info al EEG
+            end
+            eyedata(tr).padding_pre     = padding_pre;
+            eyedata(tr).padding_post    = padding_post;
+    end
+    else
+        fprintf('number of trials does not match btw mat and EEG files')
+end
+end
+
+function [vec_succesiv ind_suc mask ]                   = fun_detect_succesive_fixs_choto(eyetrial)
+    %Damian Care 27/6/19: 
+    relpos=eyetrial.stposrel;
+    %relpos= [1  0 2 2 2 7 7 0 0 2 2 9 0]';
+    pri=[relpos~=0 & [diff(relpos);relpos(end)]==0] ;
+    ult=[relpos~=0 & [relpos(1);diff(relpos)]==0];
+    vec_succesiv = relpos.*((pri+ult)>0);
+    mask = (pri+ult)>0;
+    ind_suc = find((pri+ult)>0);
+end
+function [categoria,atributo,tipo_respuesta]            = fun_extract_attributes_target_choto(SingleTrial)
+    %disp(SingleTrial.info.filenames_target)
+    try
+    s = regexp(SingleTrial.info.filenames_target, ['../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+.jpg|'...
+        '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+.jpg|'...
+        '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+.\w+.jpg|'...
+        '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+-\w+.jpg|'...
+        '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+-\w+-.jpg'], 'names');
+
+        categoria   = s.categoria;
+        atributo    = s.atributo; 
+    catch
+        disp(s)
+        keyboard
+    end
+
+    if any(ismember(SingleTrial.info.filenames_grid,SingleTrial.info.filenames_target))
+        tipo_respuesta = 'P';
+    else
+        tipo_respuesta = 'A';
+%                 categoria = [];%agregado para lidiar con error J03 y J06
+%                 atributo  = [];%" "            "             "        "
+    end
+end
+function [cat_dist,atr_dist]                            = fun_extract_dist_attributes_choto(SingleTrial, rel_position)
+            %disp(SingleTrial.info.filenames_target)
+
+
+
+            dist_ind = find(ismember(SingleTrial.info.indpos,rel_position));
+
+          try
+            s = regexp(SingleTrial.info.filenames_grid{dist_ind}, ['../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+.jpg|'...
+                '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+.jpg|'...
+                '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+.\w+.jpg|'...
+                 '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+-\w+-.jpg|'...
+                '../experiment/(?<categoria>\w+)/(?<atributo>\w+)_shined_luminance2/\w+-\w+-\w+.jpg'], 'names');
+            %keyboard
+                cat_dist   = s.categoria;
+                atr_dist    = s.atributo; 
+          catch
+              fprintf(SingleTrial.info.filenames_grid{dist_ind})
+          end
+        end
+ 
+function names                                          = loadSubjects(folder, expe, pre, type, keyw)     
+    %Names of files to load (pre and expe are only used when data were recorded separately)
+    % Load filenames (*.type) from folder.
+    % if expe: loads suj.bdf/set 
+    % if pre: loads suj_pre1/2.bdf/set
+    % if keyw  = 'sth' loads files with 'sth' within file name
+    names = dir(folder); 
+    names = {names.name};
+
+    if (nargin==5)
+        %names = names(1,1:6);
+        names = names(cellfun(@(x) ~isempty(x),regexp(names, keyw)));
+    else
+        names = dir([folder  '*.' type]);
+        names = {names.name};
+    end
+
+    if pre == 1 && expe == 1
+        return
+    elseif pre == 1 
+        names = names(cellfun(@(x) ~isempty(x),regexp(names, '_pre')));
+    elseif expe == 1 
+        names = names(cellfun(@(x) isempty(x),regexp(names, '_pre')));
+    end  
+end
+

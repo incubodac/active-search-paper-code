@@ -1,0 +1,125 @@
+function EEG = fun_epoch_n_add_trial_data_to_events(EEG, csvFilePath,trialMark,eventtype,tmin,tmax)
+
+%cellfun(@(x) sum(ismember({EEG.event.type},x)),{'150','151','200','255'})'
+%input: 
+%   EEG      : [eeglab struc] it should have al trials as continous data
+%   eventtype: [string] event type name to align ERP
+%   tmin     : [int] min time in ms of duration to include the value comes
+%               from eventduration.
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %%%%%%%%%%%loading CSV %%%%%%%%%%
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %%%test definitions%%%%%%
+    trialMark = '255'
+    eventtype = 'fixation'
+    csvFilePath = csv;
+    %%%%
+
+    data        = readtable(csvFilePath);%csv with trial info
+    respId      = 6:6:size(data,1);
+    respTimes   = data.key_resp_rt(respId);
+    respStarted = data.key_resp_started(respId);
+    stTimes   = data.stDur(respId);
+    %%%%%
+    for in = 1:numel(respTimes)
+        if isnan(respTimes(in)) 
+            respTimes(in) = 10;%revisar
+        end
+    end
+    trial_type          = data.st5_cat(respId);
+    trial_cat           = data.st5(respId);
+    trial_cat           = arrayfun(@(x) extractAfter(x ,'/'), trial_cat);
+    trial_type_Nstim    = data.Nstim(respId);
+    key_resp_keys       = data.key_resp_keys(respId)
+    rightResp           = ismember(key_resp_keys,'right');
+    leftResp            = ismember(key_resp_keys,'left');
+    TP                  = sum(rightResp & ismember(trial_type,'T'));
+    TN                  = sum(leftResp & ismember(trial_type,'A'));
+    acc                 = (TP + TN)/;
+    
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %%%%%%%%%%%EEG epoching%%%%%%%%%%
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    start_trial_urevent = [EEG.event(ismember({EEG.event.type},trialMark)).urevent]';
+    start_trial_latency = [EEG.event(ismember({EEG.event.type},trialMark)).latency]';%latencies of trials onset
+    start_trial_index   = find(ismember({EEG.event.type},trialMark));%index of events for trial onset
+    eventtype_index     = find(ismember({EEG.event.type},eventtype));
+    end_mark            = find(ismember({EEG.event.type},'200'))
+    figure(8)
+    fix = ones(length(eventtype_index));
+    hold on
+    plot([EEG.event(eventtype_index(end-1000:end)).latency],fix(end-1000:end),'.')
+    plot(start_trial_latency,2*ones(length(start_trial_latency)),'.')
+    plot(EEG.event(end_mark).latency,3,'.')
+    hold off
+    
+    %trial_epochs      = [EEG.event(start_trial_index).epoch]'; % epoch index for each start trial 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %%%%%%%ADD info to events%%%%%%%%
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    start_trial_latency = [start_trial_latency;EEG.event(find(strcmp({EEG.event.type},'200'))).latency];%list of trial onset latencies + endMark
+    tr = 1
+    %loop over fixations checking which trial they belong to
+    for evin = eventtype_index
+        %%%%%%trial info%%%%%%%%%%%%
+        if (EEG.event(evin).latency < start_trial_latency(tr+1)) && (EEG.event(evin).latency > start_trial_latency(tr))
+            EEG.event(evin).trial = tr;
+            EEG.event(evin).trial_type = trial_type{tr};
+            EEG.event(evin).trial_cat = trial_cat{tr};
+            EEG.event(evin).trial_type_Nstim = trial_type_Nstim(tr);
+        elseif  (EEG.event(evin).latency < start_trial_latency(end))&& (EEG.event(evin).latency > start_trial_latency(tr+1)) && ...
+                (EEG.event(evin).latency < start_trial_latency(tr+2))
+            tr = tr + 1;
+            EEG.event(evin).trial = tr;
+            EEG.event(evin).trial_type = trial_type{tr};
+            EEG.event(evin).trial_cat = trial_cat{tr};
+            EEG.event(evin).trial_type_Nstim = trial_type_Nstim(tr);
+        else
+            EEG.event(evin).trial = -1;
+            %EEG.event(evin).trial_type = tr;
+            %EEG.event(evin).trial_cat = trial_cat(tr);            
+        end
+        %%%%%%%%%content info%%%%%%%%%%%%%%
+        
+        
+    end
+    
+    
+    
+    
+    
+    EEG = pop_epoch( EEG, { eventtype }, limits, 'newname', 'fixs and conditions epoch', 'epochinfo', 'yes');
+    
+    ntotal =  size(EEG.data,3);
+    %%%%%%%%DAC 2022
+    EEG = pop_rmbase( EEG, [-199.2 0]);
+
+    
+    urevents = arrayfun(@(y) y.eventurevent{cellfun(@(x) x==0, y.eventlatency)},EEG.epoch);
+    if length(urevents)==EEG.trials
+        fprintf('%%%%%%%%%%%%%%\n')
+        fprintf('number of central fixations correct\n proceed to filter fix durations')
+        indtmp = [];
+        for tr = 1:EEG.trials
+            mask = [EEG.epoch(tr).eventurevent{:}]==urevents(tr);
+            durs = [EEG.epoch(tr).eventduration{:}];
+            central_dur = durs(mask); %milliseconds
+            if central_dur > tmin && central_dur < tmax
+               indtmp = [indtmp tr];
+            end
+        
+            
+        end
+    else
+        fprintf('%%%%%%%%%%%%%%\n')
+        fprintf('number of central fix and epochs does not match')
+    end   
+    
+    EEG = pop_select(EEG,'trial',  indtmp);
+    %EEG = pop_select(EEG,'time',[-0.2 tmax]);
+    EEG = pop_select(EEG,'notrial', find(arrayfun(@(x) any(strcmp(x.eventtype,'bad_ET')),EEG.epoch)) ); %reject epochs w/bad data marks
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    
+end
